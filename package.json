@@ -14,11 +14,11 @@
     "pm2:monit": "pm2 monit"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.6.1"
+    "discord.js": "^14.26.2",
+    "dotenv": "^17.4.2"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   },
   "author": "",
   "license": "ISC"
