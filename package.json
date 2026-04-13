@@ -14,8 +14,12 @@
     "pm2:monit": "pm2 monit"
   },
   "dependencies": {
+    "axios": "^1.15.0",
+    "discord-player": "^7.2.0",
+    "discord-voip": "^7.2.0",
     "discord.js": "^14.26.2",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "gtts": "^0.2.1"
   },
   "engines": {
     "node": "20.x"

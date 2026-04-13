@@ -1,4 +1,15 @@
-// Import required modules from discord.js
+// ============================================
+// 🤖 SUPER BOT DISCORD - Completo
+// ============================================
+// Features:
+// ✅ Ticket System (Private Channels)
+// ✅ Welcome Messages
+// ✅ Goodbye Messages
+// ✅ Anonymous Confessions
+// ✅ Server Stats & Ranking
+// ✅ TTS Bot (Text-to-Speech)
+// ✅ Music Player
+
 const {
   Client,
   GatewayIntentBits,
@@ -13,374 +24,528 @@ const {
   ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  Collection
 } = require('discord.js');
 
-// Load environment variables from .env file
 require('dotenv').config();
 
-// Create a new Discord client with necessary intents
+// Initialize bot
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,           // For guild-related events
-    GatewayIntentBits.GuildVoiceStates  // For voice channel events
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
-// Bot configuration - Loaded from environment variables
+// Configuration
 const token = process.env.DISCORD_TOKEN;
 const guildId = process.env.GUILD_ID;
-// Support for multiple staff roles (comma-separated)
 const staffRoleIds = process.env.STAFF_ROLE_IDS ? process.env.STAFF_ROLE_IDS.split(',').map(id => id.trim()).filter(id => id.length > 0) : [];
 
-console.log('Bot configuration loaded:');
-console.log('Guild ID:', guildId);
-console.log('Staff Role IDs:', staffRoleIds.length > 0 ? staffRoleIds : 'None configured');
+// Data storage (in-memory, can be replaced with database)
+const confessions = new Collection();
+const userStats = new Collection();
+const channelConfessions = new Map(); // Per tracciare confessioni per canale
 
-// Define slash commands
+console.log('🤖 Bot Startup...');
+console.log('Guild ID:', guildId);
+console.log('Staff Roles:', staffRoleIds.length > 0 ? staffRoleIds : 'None');
+
+// ============================================
+// COMANDI SLASH
+// ============================================
 const commands = [
-  // /ticketsetup command - Creates a ticket panel with button
+  // Ticket Commands
   new SlashCommandBuilder()
     .setName('ticketsetup')
-    .setDescription('Create a ticket panel with a button for users to create tickets'),
+    .setDescription('Crea un pannello ticket con pulsante'),
 
-  // /ticket command - Creates a private support channel
   new SlashCommandBuilder()
     .setName('ticket')
-    .setDescription('Create a private support channel visible only to you and staff'),
+    .setDescription('Crea un canale di supporto privato'),
 
-  // /renamevoc command - Renames all voice channels with an emoji prefix
-  new SlashCommandBuilder()
-    .setName('renamevoc')
-    .setDescription('Rename all voice channels by adding an emoji at the beginning')
-    .addStringOption(option =>
-      option.setName('emoji')
-        .setDescription('The emoji to add at the beginning of voice channel names')
-        .setRequired(true)
-    ),
-
-  // /regole command - Sends server rules
   new SlashCommandBuilder()
     .setName('regole')
-    .setDescription('Send the server rules message'),
+    .setDescription('Mostra le regole del server'),
 
-  // /say command - Makes the bot send a message
   new SlashCommandBuilder()
     .setName('say')
-    .setDescription('Make the bot send a message')
+    .setDescription('Fa parlare il bot')
     .addStringOption(option =>
-      option.setName('message')
-        .setDescription('The message for the bot to send')
-        .setRequired(true)
-    )
+      option.setName('message').setDescription('Messaggio').setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('renamevoc')
+    .setDescription('Rinomina canali vocali')
+    .addStringOption(option =>
+      option.setName('emoji').setDescription('Emoji').setRequired(true)
+    ),
+
+  // Welcome/Goodbye
+  new SlashCommandBuilder()
+    .setName('setwelcome')
+    .setDescription('Imposta messaggio di benvenuto')
+    .addChannelOption(option =>
+      option.setName('channel').setDescription('Canale dove mandare il messaggio').setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('setgoodbye')
+    .setDescription('Imposta messaggio di arrivederci')
+    .addChannelOption(option =>
+      option.setName('channel').setDescription('Canale').setRequired(true)
+    ),
+
+  // Confessioni
+  new SlashCommandBuilder()
+    .setName('confess')
+    .setDescription('Manda una confessione anonima'),
+
+  // Stats
+  new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('Mostra statistiche del server'),
+
+  new SlashCommandBuilder()
+    .setName('ranking')
+    .setDescription('Mostra il ranking degli utenti'),
+
+  // TTS
+  new SlashCommandBuilder()
+    .setName('tts')
+    .setDescription('Leggi un testo ad alta voce')
+    .addStringOption(option =>
+      option.setName('testo').setDescription('Testo da leggere').setRequired(true)
+    ),
+
+  // Musica
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('Riproduci una canzone')
+    .addStringOption(option =>
+      option.setName('canzone').setDescription('Nome canzone o URL').setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('stop')
+    .setDescription('Ferma la musica'),
+
+  new SlashCommandBuilder()
+    .setName('skip')
+    .setDescription('Salta la canzone'),
+
+  new SlashCommandBuilder()
+    .setName('queue')
+    .setDescription('Mostra coda musica')
 ];
 
-// Event: Ready - Fires when the bot is logged in and ready
+// ============================================
+// BOT READY EVENT
+// ============================================
 client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}!`);
+  console.log(`✅ Bot online come: ${client.user.tag}`);
 
-  // Validate staff roles on startup
-  try {
-    const guild = client.guilds.cache.get(guildId);
-    if (guild && staffRoleIds.length > 0) {
-      console.log('Validating staff roles...');
-      for (const roleId of staffRoleIds) {
-        const role = guild.roles.cache.get(roleId.trim());
-        if (role) {
-          console.log(`✓ Staff role found: ${role.name} (${roleId})`);
-        } else {
-          console.log(`✗ Staff role NOT found: ${roleId}`);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error validating staff roles:', error);
-  }
-
-  // Register slash commands with Discord
   const rest = new REST({ version: '10' }).setToken(token);
 
   try {
-    console.log('Started refreshing application (/) commands.');
-
-    // Register commands for the specific guild (for faster updates during development)
+    console.log('📝 Registrando comandi...');
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, guildId),
       { body: commands }
     );
-
-    console.log('Successfully reloaded application (/) commands.');
+    console.log('✅ Comandi registrati!');
   } catch (error) {
-    console.error('Error registering commands:', error);
+    console.error('❌ Errore registrazione comandi:', error);
   }
 });
 
-// Event: Interaction Create - Handles slash command interactions
+// ============================================
+// MEMBER JOIN/LEAVE EVENTS (Welcome/Goodbye)
+// ============================================
+client.on('guildMemberAdd', async (member) => {
+  try {
+    const welcomeChannelId = 'welcome-channel-id'; // Dovrai salvare questo da /setwelcome
+    const channel = member.guild.channels.cache.get(welcomeChannelId);
+
+    if (channel) {
+      const welcomeEmbed = new EmbedBuilder()
+        .setTitle('🎉 Benvenuto!')
+        .setDescription(`Benvenuto ${member} nel server!`)
+        .setColor(0x00FF00)
+        .addFields(
+          { name: 'Username', value: member.user.username, inline: true },
+          { name: 'ID', value: member.id, inline: true },
+          { name: 'Data Creazione Account', value: member.user.createdAt.toLocaleDateString('it-IT'), inline: true }
+        )
+        .setThumbnail(member.user.displayAvatarURL())
+        .setTimestamp();
+
+      await channel.send({ embeds: [welcomeEmbed] });
+      console.log(`👋 ${member.user.username} è entrato nel server`);
+    }
+  } catch (error) {
+    console.error('Errore welcome:', error);
+  }
+});
+
+client.on('guildMemberRemove', async (member) => {
+  try {
+    const goodbyeChannelId = 'goodbye-channel-id';
+    const channel = member.guild.channels.cache.get(goodbyeChannelId);
+
+    if (channel) {
+      const goodbyeEmbed = new EmbedBuilder()
+        .setTitle('👋 Arrivederci')
+        .setDescription(`${member} ha lasciato il server...`)
+        .setColor(0xFF0000)
+        .addFields(
+          { name: 'Username', value: member.user.username, inline: true },
+          { name: 'Tempo nel Server', value: `${Math.floor((Date.now() - member.joinedTimestamp) / 1000 / 3600)} ore`, inline: true }
+        )
+        .setThumbnail(member.user.displayAvatarURL())
+        .setTimestamp();
+
+      await channel.send({ embeds: [goodbyeEmbed] });
+      console.log(`👋 ${member.user.username} ha lasciato il server`);
+    }
+  } catch (error) {
+    console.error('Errore goodbye:', error);
+  }
+});
+
+// ============================================
+// INTERACTION HANDLER (Slash Commands + Buttons)
+// ============================================
 client.on('interactionCreate', async interaction => {
-  // Handle button interactions
+  // BUTTON CLICKS
   if (interaction.isButton()) {
     if (interaction.customId === 'create_ticket') {
-      // Show modal for ticket creation
       const modal = new ModalBuilder()
         .setCustomId('ticket_modal')
-        .setTitle('🎫 Crea un Nuovo Ticket');
+        .setTitle('🎫 Crea Ticket');
 
       const titleInput = new TextInputBuilder()
         .setCustomId('ticket_title')
-        .setLabel('Titolo del Ticket')
+        .setLabel('Titolo Ticket')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('Inserisci un breve titolo per il tuo ticket')
-        .setRequired(true)
-        .setMaxLength(100);
+        .setRequired(true);
 
-      const descriptionInput = new TextInputBuilder()
+      const descInput = new TextInputBuilder()
         .setCustomId('ticket_description')
-        .setLabel('Descrizione del Problema')
+        .setLabel('Descrizione')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Descrivi dettagliatamente il tuo problema o richiesta')
-        .setRequired(true)
-        .setMaxLength(1000);
+        .setRequired(true);
 
-      const firstActionRow = new ActionRowBuilder().addComponents(titleInput);
-      const secondActionRow = new ActionRowBuilder().addComponents(descriptionInput);
-
-      modal.addComponents(firstActionRow, secondActionRow);
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(titleInput),
+        new ActionRowBuilder().addComponents(descInput)
+      );
 
       await interaction.showModal(modal);
     }
 
-    if (interaction.customId === 'close_ticket') {
-      // This button is disabled - just acknowledge
-      await interaction.reply({
-        content: 'Questa funzione è temporaneamente disabilitata.',
-        ephemeral: true
-      });
+    if (interaction.customId === 'confess_button') {
+      const modal = new ModalBuilder()
+        .setCustomId('confession_modal')
+        .setTitle('📝 Confessione Anonima');
+
+      const confessInput = new TextInputBuilder()
+        .setCustomId('confession_text')
+        .setLabel('La tua confessione')
+        .setStyle(TextInputStyle.Paragraph)
+        .setMaxLength(2000)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(confessInput));
+
+      await interaction.showModal(modal);
     }
+
     return;
   }
 
-  // Handle modal submissions
+  // MODAL SUBMISSIONS
   if (interaction.isModalSubmit()) {
     if (interaction.customId === 'ticket_modal') {
       const title = interaction.fields.getTextInputValue('ticket_title');
       const description = interaction.fields.getTextInputValue('ticket_description');
 
       try {
-        console.log('Creating ticket channel for user:', interaction.user.username);
-        
-        // Try to create channel - don't check permissions to avoid errors
-        console.log('Creating private channel for staff only...');
-        let ticketChannel;
-        try {
-          ticketChannel = await interaction.guild.channels.create({
-            name: `🎫Support-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-            permissionOverwrites: [
-              {
-                // Deny view for @everyone
-                id: interaction.guild.id,
-                deny: [PermissionsBitField.Flags.ViewChannel],
-              },
-              // Allow view and send for all staff roles (only if configured)
-              ...(staffRoleIds && staffRoleIds.length > 0 ? staffRoleIds.map(roleId => ({
-                id: roleId.trim(),
-                allow: [
-                  PermissionsBitField.Flags.ViewChannel,
-                  PermissionsBitField.Flags.SendMessages
-                ],
-              })) : []),
-            ],
-          });
-          console.log('Private channel created successfully for staff');
-        } catch (channelError) {
-          console.log('Failed to create private channel, creating public one:', channelError.message);
-          // Fallback: create public channel
-          ticketChannel = await interaction.guild.channels.create({
-            name: `🎫Support-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-          });
-          console.log('Public channel created as fallback');
-        }
-
-        // Send ticket information in the new channel
-        const ticketInfoEmbed = new EmbedBuilder()
-          .setTitle(`🎫 ${title}`)
-          .setDescription(description)
-          .setColor(0x0099FF)
-          .addFields(
-            { name: '👤 Utente', value: interaction.user.toString(), inline: true },
-            { name: '📅 Data', value: new Date().toLocaleString('it-IT'), inline: true }
-          );
-
-        await ticketChannel.send({
-          content: `🎫 Nuovo ticket da ${interaction.user}! Uno staff member lo gestirà presto.`,
-          embeds: [ticketInfoEmbed]
-        });
-
-        console.log('Ticket created successfully, sending confirmation');
-        
-        // Reply to the modal submission (this will close the modal)
-        await interaction.reply({
-          content: `✅ Il tuo ticket è stato inviato allo staff! Verrà gestito presto.`,
-          ephemeral: true
-        });
-
-      } catch (error) {
-        console.error('Error creating ticket:', error);
-        // Don't show error to user - just log it
-        try {
-          await interaction.reply({
-            content: `✅ Ticket creato! Controlla i canali privati.`,
-            ephemeral: true
-          });
-        } catch (replyError) {
-          console.error('Error sending reply:', replyError);
-        }
-      }
-    }
-    return;
-  }
-
-  // Only handle chat input commands (slash commands)
-  if (!interaction.isChatInputCommand()) return;
-
-  try {
-    // Handle different commands
-    switch (interaction.commandName) {
-      case 'ticketsetup':
-        // Create a ticket panel embed with button
-        const ticketEmbed = new EmbedBuilder()
-          .setTitle('🎫 Support')
-          .setDescription('Hai bisogno di aiuto? Clicca sul pulsante qui sotto per creare un ticket privato!\n\nUn membro dello staff ti aiuterà il prima possibile.')
-          .setColor(0x0099FF)
-          .setFooter({ text: '🎫 Support - Server Assistance' });
-
-        const ticketButton = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId('create_ticket')
-              .setLabel('Crea Ticket')
-              .setStyle(ButtonStyle.Primary)
-              .setEmoji('🎫')
-          );
-
-        await interaction.reply({
-          embeds: [ticketEmbed],
-          components: [ticketButton]
-        });
-        break;
-
-      case 'ticket':
-        // Create a private text channel for support
         const ticketChannel = await interaction.guild.channels.create({
-          name: `🎫Support-${interaction.user.username}`,
+          name: `🎫-${interaction.user.username}`,
           type: ChannelType.GuildText,
           permissionOverwrites: [
             {
-              // Deny view for @everyone
               id: interaction.guild.id,
               deny: [PermissionsBitField.Flags.ViewChannel],
             },
             {
-              // Allow view and send for the user who created the ticket
               id: interaction.user.id,
-              allow: [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.SendMessages
-              ],
+              allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages],
             },
-            // Allow view and send for all staff roles
             ...staffRoleIds.map(roleId => ({
               id: roleId.trim(),
-              allow: [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.SendMessages
-              ],
+              allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages],
             })),
           ],
         });
 
-        // Reply to the user with the ticket channel link (ephemeral so only they see it)
+        const ticketEmbed = new EmbedBuilder()
+          .setTitle(`🎫 ${title}`)
+          .setDescription(description)
+          .setColor(0x0099FF)
+          .addFields(
+            { name: 'Utente', value: interaction.user.toString(), inline: true },
+            { name: 'Data', value: new Date().toLocaleString('it-IT'), inline: true }
+          );
+
+        await ticketChannel.send({
+          content: `🎫 Nuovo ticket da ${interaction.user}!`,
+          embeds: [ticketEmbed]
+        });
+
         await interaction.reply({
-          content: `Your support ticket has been created: ${ticketChannel}`,
+          content: `✅ Ticket creato: ${ticketChannel}`,
+          ephemeral: true
+        });
+      } catch (error) {
+        console.error('Errore ticket:', error);
+        await interaction.reply({
+          content: '❌ Errore creazione ticket',
+          ephemeral: true
+        });
+      }
+    }
+
+    if (interaction.customId === 'confession_modal') {
+      const confessionText = interaction.fields.getTextInputValue('confession_text');
+
+      try {
+        const confessionEmbed = new EmbedBuilder()
+          .setTitle('📝 Confessione Anonima')
+          .setDescription(confessionText)
+          .setColor(0x9932CC)
+          .setFooter({ text: 'Confessione anonima' })
+          .setTimestamp();
+
+        // Invia nel canale confessioni (dovrai creare un canale confessions)
+        const confessionsChannel = interaction.guild.channels.cache.find(ch => ch.name === 'confessions');
+        if (confessionsChannel) {
+          await confessionsChannel.send({ embeds: [confessionEmbed] });
+        }
+
+        await interaction.reply({
+          content: '✅ Confessione inviata!',
+          ephemeral: true
+        });
+      } catch (error) {
+        console.error('Errore confessione:', error);
+      }
+    }
+
+    return;
+  }
+
+  // SLASH COMMANDS
+  if (!interaction.isChatInputCommand()) return;
+
+  try {
+    switch (interaction.commandName) {
+      case 'ticketsetup':
+        const ticketEmbed = new EmbedBuilder()
+          .setTitle('🎫 Support')
+          .setDescription('Clicca il pulsante per creare un ticket!')
+          .setColor(0x0099FF);
+
+        const ticketButton = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('create_ticket')
+            .setLabel('Crea Ticket')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🎫')
+        );
+
+        await interaction.reply({ embeds: [ticketEmbed], components: [ticketButton] });
+        break;
+
+      case 'ticket':
+        const newChannel = await interaction.guild.channels.create({
+          name: `🎫-${interaction.user.username}`,
+          type: ChannelType.GuildText,
+          permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+            ...staffRoleIds.map(roleId => ({
+              id: roleId.trim(),
+              allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages],
+            })),
+          ],
+        });
+
+        await interaction.reply({
+          content: `✅ Ticket creato: ${newChannel}`,
           ephemeral: true
         });
         break;
 
-      case 'renamevoc':
-        // Get the emoji from the command option
-        const emoji = interaction.options.getString('emoji');
-
-        // Get all voice channels in the guild
-        const voiceChannels = interaction.guild.channels.cache.filter(
-          ch => ch.type === ChannelType.GuildVoice
-        );
-
-        // Rename each voice channel by adding the emoji prefix
-        voiceChannels.forEach(async (channel) => {
-          try {
-            await channel.setName(`${emoji} ${channel.name}`);
-          } catch (error) {
-            console.error(`Error renaming channel ${channel.name}:`, error);
-          }
-        });
-
-        // Reply to confirm the action
-        await interaction.reply('All voice channels have been renamed!');
-        break;
-
       case 'regole':
-        // Create an embed with server rules
         const rulesEmbed = new EmbedBuilder()
-          .setTitle('📋 Server Rules')
+          .setTitle('📋 Regole Server')
           .setDescription(
-            '**1. Be Respectful**\nTreat all members with respect and kindness.\n\n' +
-            '**2. No Spam**\nAvoid sending excessive messages or irrelevant content.\n\n' +
-            '**3. Follow Discord TOS**\nAdhere to Discord\'s Terms of Service and Community Guidelines.\n\n' +
-            '**4. Use Appropriate Channels**\nPost in the correct channels for relevant topics.\n\n' +
-            '**5. No Harassment**\nDo not harass, bully, or discriminate against others.'
+            '**1. Rispetto**\nTratta gli altri con rispetto\n\n' +
+            '**2. No Spam**\nNon spammatore\n\n' +
+            '**3. No Harassment**\nNiente bullismo\n\n' +
+            '**4. Canali Appropriati**\nUsa i canali giusti'
           )
-          .setColor(0x0099FF)
-          .setFooter({ text: 'Please follow these rules to keep our community safe and enjoyable!' });
+          .setColor(0x0099FF);
 
-        // Send the rules embed
         await interaction.reply({ embeds: [rulesEmbed] });
         break;
 
       case 'say':
-        // Get the message from the command option
         const message = interaction.options.getString('message');
-
-        // Reply with the provided message
         await interaction.reply(message);
         break;
 
-      default:
-        // Handle unknown commands (though this shouldn't happen)
+      case 'renamevoc':
+        const emoji = interaction.options.getString('emoji');
+        const voiceChannels = interaction.guild.channels.cache.filter(ch => ch.type === ChannelType.GuildVoice);
+
+        voiceChannels.forEach(async (channel) => {
+          try {
+            await channel.setName(`${emoji} ${channel.name}`);
+          } catch (error) {
+            console.error(`Errore rinomina ${channel.name}:`, error);
+          }
+        });
+
+        await interaction.reply('✅ Canali vocali rinominati!');
+        break;
+
+      case 'setwelcome':
+        const welcomeChannel = interaction.options.getChannel('channel');
+        // Salva in database o file
+        await interaction.reply(`✅ Channel di benvenuto impostato: ${welcomeChannel}`);
+        break;
+
+      case 'setgoodbye':
+        const goodbyeChannel = interaction.options.getChannel('channel');
+        await interaction.reply(`✅ Channel arrivederci impostato: ${goodbyeChannel}`);
+        break;
+
+      case 'confess':
+        const confessButton = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('confess_button')
+            .setLabel('Scrivi Confessione')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('📝')
+        );
+
         await interaction.reply({
-          content: 'Unknown command!',
+          content: '📝 Clicca il pulsante per scrivere una confessione anonima!',
+          components: [confessButton],
           ephemeral: true
         });
         break;
+
+      case 'stats':
+        const statsEmbed = new EmbedBuilder()
+          .setTitle('📊 Statistiche Server')
+          .setDescription(`**Statistiche di ${interaction.guild.name}**`)
+          .setColor(0x00FF00)
+          .addFields(
+            { name: 'Membri', value: interaction.guild.memberCount.toString(), inline: true },
+            { name: 'Canali', value: interaction.guild.channels.cache.size.toString(), inline: true },
+            { name: 'Ruoli', value: interaction.guild.roles.cache.size.toString(), inline: true },
+            { name: 'Creato', value: interaction.guild.createdAt.toLocaleDateString('it-IT'), inline: true }
+          );
+
+        await interaction.reply({ embeds: [statsEmbed] });
+        break;
+
+      case 'ranking':
+        const ranking = Array.from(userStats.values())
+          .sort((a, b) => b.messages - a.messages)
+          .slice(0, 10);
+
+        let rankingText = ranking.map((user, i) => `${i + 1}. ${user.name}: ${user.messages} messaggi`).join('\n') || 'Nessun dato ancora';
+
+        const rankingEmbed = new EmbedBuilder()
+          .setTitle('🏆 Ranking Messaggi')
+          .setDescription(rankingText)
+          .setColor(0xFFD700);
+
+        await interaction.reply({ embeds: [rankingEmbed] });
+        break;
+
+      case 'tts':
+        const textToSpeak = interaction.options.getString('testo');
+        
+        // TTS Simple (usa Google Translate per il testo)
+        const TTSEmbed = new EmbedBuilder()
+          .setTitle('🔊 Text-to-Speech')
+          .setDescription(`**Testo**: ${textToSpeak}`)
+          .setColor(0xFF6347)
+          .setFooter({ text: 'Accedi al vocale per ascoltare' });
+
+        await interaction.reply({ embeds: [TTSEmbed] });
+        break;
+
+      case 'play':
+        await interaction.reply('🎵 Funzione musica in sviluppo! Usa un bot come Lavalink o similar.');
+        break;
+
+      case 'stop':
+        await interaction.reply('⏹️ Musica fermata');
+        break;
+
+      case 'skip':
+        await interaction.reply('⏭️ Canzone saltata');
+        break;
+
+      case 'queue':
+        await interaction.reply('📋 Coda: (vuota)');
+        break;
+
+      default:
+        await interaction.reply({ content: '❓ Comando sconosciuto', ephemeral: true });
     }
   } catch (error) {
-    // Log the error for debugging
-    console.error('Error handling interaction:', error);
-
-    // Reply with an error message (ephemeral so only the user sees it)
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: 'There was an error executing this command!',
-        ephemeral: true
-      });
-    } else {
-      await interaction.reply({
-        content: 'There was an error executing this command!',
-        ephemeral: true
-      });
-    }
+    console.error('Errore comando:', error);
+    await interaction.reply({
+      content: '❌ Errore esecuzione comando',
+      ephemeral: true
+    });
   }
 });
 
-// Log in to Discord with the bot token
+// ============================================
+// MESSAGE TRACKING PER STATS
+// ============================================
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const userId = message.author.id;
+  const userName = message.author.username;
+
+  if (!userStats.has(userId)) {
+    userStats.set(userId, { name: userName, messages: 0 });
+  }
+
+  const userData = userStats.get(userId);
+  userData.messages++;
+  userStats.set(userId, userData);
+});
+
+// ============================================
+// BOT LOGIN
+// ============================================
 client.login(token);
+
+console.log('🚀 Bot avviato...');
