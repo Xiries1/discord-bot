@@ -1,0 +1,25 @@
+{
+  "name": "discord-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot using discord.js v14 with slash commands",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "pm2:start": "pm2 start index.js --name discord-bot",
+    "pm2:stop": "pm2 stop discord-bot",
+    "pm2:restart": "pm2 restart discord-bot",
+    "pm2:delete": "pm2 delete discord-bot",
+    "pm2:logs": "pm2 logs discord-bot",
+    "pm2:monit": "pm2 monit"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.6.1"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
